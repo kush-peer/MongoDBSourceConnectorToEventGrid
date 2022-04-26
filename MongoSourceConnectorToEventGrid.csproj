@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net5.0</TargetFramework>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(RunConfiguration)' == 'MongoDBSourceChangeStreamService' " />
+  <ItemGroup>
+    <None Remove="Logging\" />
+    <None Remove="ServiceRegistration\" />
+    <None Remove="MongoDB.Driver" />
+    <None Remove="MongoDBChangeStream\" />
+    <None Remove="EventGridPublisher\" />
+    <None Remove="Model\" />
+    <None Remove="Microsoft.Azure.EventGrid" />
+    <None Remove="NuGet.PackageManagement" />
+    <None Remove="System.Configuration.ConfigurationManager" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Logging\" />
+    <Folder Include="ServiceRegistration\" />
+    <Folder Include="MongoDBChangeStream\" />
+    <Folder Include="EventGridPublisher\" />
+    <Folder Include="Models\" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="MongoDB.Driver" Version="2.15.0" />
+    <PackageReference Include="Microsoft.Azure.EventGrid" Version="3.2.1" />
+    <PackageReference Include="NuGet.PackageManagement" Version="6.1.0" />
+  </ItemGroup>
+</Project>
