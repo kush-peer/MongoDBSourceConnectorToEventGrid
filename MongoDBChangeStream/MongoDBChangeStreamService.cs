@@ -1,6 +1,9 @@
 ﻿using System;
+using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Azure.Storage.Blobs;
 using Microsoft.Extensions.Configuration;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
@@ -18,15 +21,21 @@ namespace MongoSourceConnectorToEventGrid
         private readonly IAppLogger<MongoDBChangeStreamService> logger;
         private readonly SemaphoreSlim semaphoreSlim = new(1, 1);
         EventGridPublisherService eventGridPublisherService;
+        private BlobServiceClient blobServiceClient;
+        private string container;
+        private string storageAccountCon;
 
         #region Public Methods
-        public MongoDBChangeStreamService(IMongoClient client, IAppLogger<MongoDBChangeStreamService> logger, EventGridPublisherService eventGridPublisherService, IConfiguration configuration)
+        public MongoDBChangeStreamService(IMongoClient client, IAppLogger<MongoDBChangeStreamService> logger, 
+            EventGridPublisherService eventGridPublisherService,  IConfiguration configuration)
         {
             this.database = client.GetDatabase(configuration["mongodb-database"]);
             this.collection = this.database.GetCollection<BsonDocument>(configuration["mongodb-collection"]);
             this.eventGridPublisherService = eventGridPublisherService;
             this.client = client;
             this.logger = logger;
+            this.storageAccountCon = configuration["storage-account"];
+            this.container = configuration["container"];
         }
         public void Init()
         {
@@ -86,18 +95,45 @@ namespace MongoSourceConnectorToEventGrid
                     };
 
                     // Push info to Event Grid
-                    var Issucess = await eventGridPublisherService.EventGridPublisher(eventDetails);                    
+                    // var isEventGridUpdated = await eventGridPublisherService.EventGridPublisher(eventDetails);
+
+                    var isBlobUpdate = await UpdateStorage(updatedDocument);
 
                     // log information
-                    this.logger.LogInformation($"Changes tracked successfully by change stream : {eventDetails.Data}");                    
-
+                    if(isBlobUpdate) 
+                        this.logger.LogInformation($"Changes tracked successfully by change stream : {eventDetails.Data}");
+                    else
+                    {
+                        this.logger.LogError($"Unable to push changes to blob for type : {eventDetails.EventType}");
+                    }
                 }
                 catch (MongoException exception)
                 {
                     // log mongo exception - helpful for developers
                     this.logger.LogError("Change Stream watcher. Exception:" + exception.Message);
                 }
-            });
+            })!;
+        }
+
+        private async Task<bool> UpdateStorage( object updatedDocument)
+        {
+            try
+            {
+                // TODO Move configuration to service registrations
+                var filePath = $"{container}-" + Guid.NewGuid() + ".json";
+                this.blobServiceClient = new BlobServiceClient(storageAccountCon);
+                var containerClient = this.blobServiceClient.GetBlobContainerClient(container);
+                var blobClient = containerClient.GetBlobClient(filePath);
+                await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(updatedDocument.ToJson()));
+                var blob = await blobClient.UploadAsync(ms);
+                var uploadedVersion = blob.Value.VersionId != null;
+                return uploadedVersion;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+                throw;
+            }
         }
         #endregion
     }
