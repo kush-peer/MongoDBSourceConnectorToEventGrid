@@ -1,15 +1,20 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Dynamic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using Microsoft.Extensions.Configuration;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
 using MongoDB.Driver;
 using MongoSourceConnectorToEventGrid.EventGridPublisher;
 using MongoSourceConnectorToEventGrid.Models;
+using SolTechnology.Avro;
 
 namespace MongoSourceConnectorToEventGrid
 {
@@ -82,8 +87,11 @@ namespace MongoSourceConnectorToEventGrid
                 try
                 {
                     // Deserialize full document with Plain object 
-                    var updatedDocument = BsonSerializer.Deserialize<object>(change.FullDocument);
-
+                    var updatedDocument = BsonSerializer.Deserialize<IDictionary<string, object>>(change.FullDocument);
+                    
+                    // remove _id aka objectId key from Mongodb
+                    updatedDocument.Remove("_id");
+                    
                     // Create event data object
                     var eventDetails = new EventDetails()
                     {
@@ -115,17 +123,25 @@ namespace MongoSourceConnectorToEventGrid
             })!;
         }
 
-        private async Task<bool> UpdateStorage( object updatedDocument)
+        private async Task<bool> UpdateStorage(IDictionary<string, object> updatedDocument)
         {
             try
             {
+                
                 // TODO Move configuration to service registrations
+                
                 var filePath = $"{container}-" + Guid.NewGuid() + ".json";
                 this.blobServiceClient = new BlobServiceClient(storageAccountCon);
                 var containerClient = this.blobServiceClient.GetBlobContainerClient(container);
                 var blobClient = containerClient.GetBlobClient(filePath);
+                // case 1 for json type
                 await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(updatedDocument.ToJson()));
                 var blob = await blobClient.UploadAsync(ms);
+                // case2 for avro types
+                //var serializedContent = AvroConvert.Serialize(updatedDocument);
+                //await blobClient.DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots);
+                //var blob  =await blobClient.UploadAsync(new BinaryData(serializedContent));
+
                 var uploadedVersion = blob.Value.VersionId != null;
                 return uploadedVersion;
             }
