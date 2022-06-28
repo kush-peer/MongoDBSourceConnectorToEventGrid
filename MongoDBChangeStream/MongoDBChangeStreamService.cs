@@ -1,20 +1,19 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Dynamic;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Azure.Storage;
 using Azure.Storage.Blobs;
-using Azure.Storage.Blobs.Models;
+using Azure.Storage.Files.DataLake;
 using Microsoft.Extensions.Configuration;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
 using MongoDB.Driver;
 using MongoSourceConnectorToEventGrid.EventGridPublisher;
 using MongoSourceConnectorToEventGrid.Models;
-using SolTechnology.Avro;
 
 namespace MongoSourceConnectorToEventGrid
 {
@@ -29,6 +28,10 @@ namespace MongoSourceConnectorToEventGrid
         private BlobServiceClient blobServiceClient;
         private string container;
         private string storageAccountCon;
+        private string dLGen2AccountName;
+        private string dLGen2AccountKey;
+        private string fileSystemName;
+        private string dataLakeGen2Uri;
 
         #region Public Methods
         public MongoDBChangeStreamService(IMongoClient client, IAppLogger<MongoDBChangeStreamService> logger, 
@@ -40,7 +43,12 @@ namespace MongoSourceConnectorToEventGrid
             this.client = client;
             this.logger = logger;
             this.storageAccountCon = configuration["storage-account"];
+            this.dLGen2AccountName = configuration["dataLakeGen2-accountName"];
+            this.dLGen2AccountKey = configuration["dataLakeGen2-accountKey"];
+            this.fileSystemName = configuration["fileSystemName"];
+            this.dataLakeGen2Uri = configuration["dataLakeGen2Uri"];
             this.container = configuration["container"];
+           
         }
         public void Init()
         {
@@ -87,7 +95,7 @@ namespace MongoSourceConnectorToEventGrid
                 try
                 {
                     // Deserialize full document with Plain object 
-                    var updatedDocument = BsonSerializer.Deserialize<IDictionary<string, object>>(change.FullDocument);
+                    var updatedDocument = BsonSerializer.Deserialize<Dictionary<string, object>>(change.FullDocument);
                     
                     // remove _id aka objectId key from Mongodb
                     updatedDocument.Remove("_id");
@@ -123,7 +131,7 @@ namespace MongoSourceConnectorToEventGrid
             })!;
         }
 
-        private async Task<bool> UpdateStorage(IDictionary<string, object> updatedDocument)
+        private async Task<bool> UpdateBlobStorage(IDictionary<string, object> updatedDocument)
         {
             try
             {
@@ -151,6 +159,56 @@ namespace MongoSourceConnectorToEventGrid
                 throw;
             }
         }
+
+        private async Task<bool> UpdateStorage(Dictionary<string, object> updatedDocument)
+        {
+            try
+            {
+
+                var filePath = $"{container}" + ".csv";
+
+                StorageSharedKeyCredential sharedKeyCredential =
+                     new(dLGen2AccountName, dLGen2AccountKey);
+                DataLakeServiceClient dataLakeServiceClient = new DataLakeServiceClient
+                    (new Uri(dataLakeGen2Uri), sharedKeyCredential);
+              
+                DataLakeFileSystemClient fileSystemClient =
+                  dataLakeServiceClient.GetFileSystemClient(fileSystemName);
+
+                DataLakeDirectoryClient directoryClient =
+                fileSystemClient.GetDirectoryClient(container);
+
+               
+                DataLakeFileClient fileClient = await directoryClient.CreateFileAsync(filePath);
+
+                var csvFileFormat = String.Join(Environment.NewLine, updatedDocument.Select(d => $"{d.Key};{d.Value}"));
+                
+                // case 1 for json type to upload file
+                await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(csvFileFormat));
+                await fileClient.DeleteIfExistsAsync();
+                var file = await fileClient.UploadAsync(ms);
+                var uploadedVer = file.Value.ToJson() != null;
+
+                
+                // case to append data
+                //fileClient.CreateIfNotExists();
+                //string leaseId = null;
+                //long currentlength = fileClient.GetPropertiesAsync().Result.Value.ContentLength;
+                //long fileSize = ms.Length;
+                //var file = await fileClient.AppendAsync(ms, currentlength, leaseId:leaseId);
+                //await fileClient.FlushAsync(position: currentlength + fileSize, close: true, conditions: new Azure.Storage.Files.DataLake.Models.DataLakeRequestConditions() { LeaseId = leaseId });
+                ////ms.Position = 0;
+                ////File.WriteAllBytes(filePath, ms.ToArray());
+                //var uploadedVer = file.ToJson() != null;
+                return uploadedVer;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+                throw;
+            }
+        }
+
         #endregion
     }
 }
