@@ -165,32 +165,30 @@ namespace MongoSourceConnectorToEventGrid
             try
             {
 
-                var filePath = $"{container}" + ".csv";
-
-                StorageSharedKeyCredential sharedKeyCredential =
-                     new(dLGen2AccountName, dLGen2AccountKey);
-                DataLakeServiceClient dataLakeServiceClient = new DataLakeServiceClient
-                    (new Uri(dataLakeGen2Uri), sharedKeyCredential);
+                StorageSharedKeyCredential sharedKeyCredential =  new(dLGen2AccountName, dLGen2AccountKey);
+                DataLakeServiceClient dataLakeServiceClient = new DataLakeServiceClient (new Uri(dataLakeGen2Uri), sharedKeyCredential);
               
-                DataLakeFileSystemClient fileSystemClient =
-                  dataLakeServiceClient.GetFileSystemClient(fileSystemName);
+                DataLakeFileSystemClient fileSystemClient = dataLakeServiceClient.GetFileSystemClient(fileSystemName);
 
-                DataLakeDirectoryClient directoryClient =
-                fileSystemClient.GetDirectoryClient(container);
+                DataLakeDirectoryClient directoryClient = fileSystemClient.GetDirectoryClient(container);
 
-               
+                // Case 1: CSV file type
+                var filePath = $"{container}" + ".csv";
                 DataLakeFileClient fileClient = await directoryClient.CreateFileAsync(filePath);
-
                 var csvFileFormat = String.Join(Environment.NewLine, updatedDocument.Select(d => $"{d.Key};{d.Value}"));
-                
-                // case 1 for json type to upload file
                 await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(csvFileFormat));
+                
+                // case 2 json file type 
+                //var filePath = $"{container}" + ".json";
+                //DataLakeFileClient fileClient = await directoryClient.CreateFileAsync(filePath);
+                //await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(csvFileFormat.ToJson()));
+
+                // case explore nuget package for avro or parquet file formats
+
                 await fileClient.DeleteIfExistsAsync();
                 var file = await fileClient.UploadAsync(ms);
-                var uploadedVer = file.Value.ToJson() != null;
-
                 
-                // case to append data
+                // case  to append data
                 //fileClient.CreateIfNotExists();
                 //string leaseId = null;
                 //long currentlength = fileClient.GetPropertiesAsync().Result.Value.ContentLength;
@@ -199,7 +197,9 @@ namespace MongoSourceConnectorToEventGrid
                 //await fileClient.FlushAsync(position: currentlength + fileSize, close: true, conditions: new Azure.Storage.Files.DataLake.Models.DataLakeRequestConditions() { LeaseId = leaseId });
                 ////ms.Position = 0;
                 ////File.WriteAllBytes(filePath, ms.ToArray());
-                //var uploadedVer = file.ToJson() != null;
+                
+                var uploadedVer = file.ToJson() != null;
+
                 return uploadedVer;
             }
             catch (Exception e)
