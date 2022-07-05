@@ -173,15 +173,15 @@ namespace MongoSourceConnectorToEventGrid
                 DataLakeDirectoryClient directoryClient = fileSystemClient.GetDirectoryClient(container);
 
                 // Case 1: CSV file type
-                var filePath = $"{container}" + ".csv";
-                DataLakeFileClient fileClient = await directoryClient.CreateFileAsync(filePath);
-                var csvFileFormat = String.Join(Environment.NewLine, updatedDocument.Select(d => $"{d.Key};{d.Value}"));
-                await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(csvFileFormat));
-                
-                // case 2 json file type 
-                //var filePath = $"{container}" + ".json";
+                //var filePath = $"{container}" + ".csv";
                 //DataLakeFileClient fileClient = await directoryClient.CreateFileAsync(filePath);
-                //await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(csvFileFormat.ToJson()));
+                //var csvFileFormat = String.Join(Environment.NewLine, updatedDocument.Select(d => $"{d.Key};{d.Value}"));
+                //await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(csvFileFormat));
+
+                // case 2 json file type 
+                var filePath = $"{container}" + ".json";
+                DataLakeFileClient fileClient = await directoryClient.CreateFileAsync(filePath);
+                await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(updatedDocument.ToJson()));
 
                 // case explore nuget package for avro or parquet file formats
 
