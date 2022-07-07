@@ -1,13 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Azure.Storage;
 using Azure.Storage.Blobs;
 using Azure.Storage.Files.DataLake;
+using Azure.Storage.Files.DataLake.Models;
 using Microsoft.Extensions.Configuration;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
@@ -82,6 +82,7 @@ namespace MongoSourceConnectorToEventGrid
             // release thread
             this.semaphoreSlim.Release();
         }
+
         private async Task WatchCollectionUpdates(IChangeStreamCursor<ChangeStreamDocument<BsonDocument>> cursor)
         {
             await cursor?.ForEachAsync(async change =>
@@ -104,13 +105,13 @@ namespace MongoSourceConnectorToEventGrid
                     var eventDetails = new EventDetails()
                     {
                         EventType = change.OperationType.ToString(),
-                        Data = updatedDocument.ToJson(),
+                        //Data = updatedDocument.ToJson(), this is actual delta data coming from Mongodb
                         EventTime = DateTime.UtcNow,
                         Subject = "MongoDB Change Stream Connector",
                         Version = "1.0"
                     };
 
-                    // Push info to Event Grid
+                    // Push info to Event Grid in case of custom events
                     // var isEventGridUpdated = await eventGridPublisherService.EventGridPublisher(eventDetails);
 
                     var isBlobUpdate = await UpdateStorage(updatedDocument);
@@ -125,41 +126,17 @@ namespace MongoSourceConnectorToEventGrid
                 }
                 catch (MongoException exception)
                 {
-                    // log mongo exception - helpful for developers
+                    // log mongodb exception - helpful for developers
                     this.logger.LogError("Change Stream watcher. Exception:" + exception.Message);
                 }
             })!;
         }
 
-        private async Task<bool> UpdateBlobStorage(IDictionary<string, object> updatedDocument)
-        {
-            try
-            {
-                
-                // TODO Move configuration to service registrations
-                
-                var filePath = $"{container}-" + Guid.NewGuid() + ".json";
-                this.blobServiceClient = new BlobServiceClient(storageAccountCon);
-                var containerClient = this.blobServiceClient.GetBlobContainerClient(container);
-                var blobClient = containerClient.GetBlobClient(filePath);
-                // case 1 for json type
-                await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(updatedDocument.ToJson()));
-                var blob = await blobClient.UploadAsync(ms);
-                // case2 for avro types
-                //var serializedContent = AvroConvert.Serialize(updatedDocument);
-                //await blobClient.DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots);
-                //var blob  =await blobClient.UploadAsync(new BinaryData(serializedContent));
-
-                var uploadedVersion = blob.Value.VersionId != null;
-                return uploadedVersion;
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine(e);
-                throw;
-            }
-        }
-
+        /// <summary>
+        /// Upload delta changes to ADL gen 2
+        /// </summary>
+        /// <param name="updatedDocument"></param>
+        /// <returns></returns>
         private async Task<bool> UpdateStorage(Dictionary<string, object> updatedDocument)
         {
             try
@@ -183,24 +160,64 @@ namespace MongoSourceConnectorToEventGrid
                 DataLakeFileClient fileClient = await directoryClient.CreateFileAsync(filePath);
                 await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(updatedDocument.ToJson()));
 
-                // case explore nuget package for avro or parquet file formats
+                // case explore nuget package for avro or parquet file formats 
 
                 await fileClient.DeleteIfExistsAsync();
                 var file = await fileClient.UploadAsync(ms);
+
+                var fileAccessControl = await fileClient.GetAccessControlAsync();
+
+                var accessControlList = PathAccessControlExtensions.ParseAccessControlList(
+                    "user::rwx,group::rwx,other::rw-");
+                await fileClient.SetAccessControlListAsync((accessControlList));
                 
-                // case  to append data
+                // case  to append data - not ideal solution
                 //fileClient.CreateIfNotExists();
                 //string leaseId = null;
                 //long currentlength = fileClient.GetPropertiesAsync().Result.Value.ContentLength;
                 //long fileSize = ms.Length;
                 //var file = await fileClient.AppendAsync(ms, currentlength, leaseId:leaseId);
                 //await fileClient.FlushAsync(position: currentlength + fileSize, close: true, conditions: new Azure.Storage.Files.DataLake.Models.DataLakeRequestConditions() { LeaseId = leaseId });
-                ////ms.Position = 0;
-                ////File.WriteAllBytes(filePath, ms.ToArray());
+                //ms.Position = 0;
+                //File.WriteAllBytes(filePath, ms.ToArray());
                 
                 var uploadedVer = file.ToJson() != null;
 
                 return uploadedVer;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Upload data to Blob storage 
+        /// </summary>
+        /// <param name="updatedDocument"></param>
+        /// <returns></returns>
+        private async Task<bool> UpdateBlobStorage(IDictionary<string, object> updatedDocument)
+        {
+            try
+            {
+
+                // TODO Move configuration to service registrations
+
+                var filePath = $"{container}-" + Guid.NewGuid() + ".json";
+                this.blobServiceClient = new BlobServiceClient(storageAccountCon);
+                var containerClient = this.blobServiceClient.GetBlobContainerClient(container);
+                var blobClient = containerClient.GetBlobClient(filePath);
+                // case 1 for json type
+                await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(updatedDocument.ToJson()));
+                var blob = await blobClient.UploadAsync(ms);
+                // case2 for avro types
+                //var serializedContent = AvroConvert.Serialize(updatedDocument);
+                //await blobClient.DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots);
+                //var blob  =await blobClient.UploadAsync(new BinaryData(serializedContent));
+
+                var uploadedVersion = blob.Value.VersionId != null;
+                return uploadedVersion;
             }
             catch (Exception e)
             {
