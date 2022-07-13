@@ -41,7 +41,7 @@ namespace MongoSourceConnectorToEventGrid
             {
                 endpoints.MapGet("/", async context =>
                 {
-                    await context.Response.WriteAsync($"Server Time (UTC): {DateTime.UtcNow}  {Environment.NewLine}Change Stream Service : MongoDB Source Connector to Event Grid in Progress");
+                    await context.Response.WriteAsync($"Server Time (UTC): {DateTime.UtcNow}  {Environment.NewLine}Change Stream Service : MongoDB Source Connector in Progress");
                 });
             });
         }

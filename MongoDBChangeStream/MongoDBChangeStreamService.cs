@@ -34,6 +34,7 @@ namespace MongoSourceConnectorToEventGrid
         private string dataLakeGen2Uri;
 
         #region Public Methods
+
         public MongoDBChangeStreamService(IMongoClient client, IAppLogger<MongoDBChangeStreamService> logger, 
             EventGridPublisherService eventGridPublisherService,  IConfiguration configuration)
         {
@@ -50,6 +51,10 @@ namespace MongoSourceConnectorToEventGrid
             this.container = configuration["container"];
            
         }
+
+        /// <summary>
+        /// Intiliaze Thread
+        /// </summary>
         public void Init()
         {
             new Thread(async () => await ObserveCollections()).Start();
@@ -57,6 +62,11 @@ namespace MongoSourceConnectorToEventGrid
         #endregion
 
         #region Private Methods
+
+        /// <summary>
+        /// Observe Collection for Update, insert or Delete activities 
+        /// </summary>
+        /// <returns></returns>
         private async Task ObserveCollections()
         {
             // Filter definition for document updated 
@@ -82,6 +92,12 @@ namespace MongoSourceConnectorToEventGrid
             // release thread
             this.semaphoreSlim.Release();
         }
+
+        /// <summary>
+        /// Mongo DB change stream to track changes on collection
+        /// </summary>
+        /// <param name="cursor"></param>
+        /// <returns></returns>
 
         private async Task WatchCollectionUpdates(IChangeStreamCursor<ChangeStreamDocument<BsonDocument>> cursor)
         {
@@ -111,7 +127,7 @@ namespace MongoSourceConnectorToEventGrid
                         Version = "1.0"
                     };
 
-                    // Push info to Event Grid in case of custom events
+                    // In case of custom events, use thos code
                     // var isEventGridUpdated = await eventGridPublisherService.EventGridPublisher(eventDetails);
 
                     var isBlobUpdate = await UpdateStorage(updatedDocument);
@@ -148,19 +164,11 @@ namespace MongoSourceConnectorToEventGrid
                 DataLakeFileSystemClient fileSystemClient = dataLakeServiceClient.GetFileSystemClient(fileSystemName);
 
                 DataLakeDirectoryClient directoryClient = fileSystemClient.GetDirectoryClient(container);
-
-                // Case 1: CSV file type
-                //var filePath = $"{container}" + ".csv";
-                //DataLakeFileClient fileClient = await directoryClient.CreateFileAsync(filePath);
-                //var csvFileFormat = String.Join(Environment.NewLine, updatedDocument.Select(d => $"{d.Key};{d.Value}"));
-                //await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(csvFileFormat));
-
-                // case 2 json file type 
+                
+                // json file type 
                 var filePath = $"{container}" + ".json";
                 DataLakeFileClient fileClient = await directoryClient.CreateFileAsync(filePath);
                 await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(updatedDocument.ToJson()));
-
-                // case explore nuget package for avro or parquet file formats 
 
                 await fileClient.DeleteIfExistsAsync();
                 var file = await fileClient.UploadAsync(ms);
@@ -171,23 +179,14 @@ namespace MongoSourceConnectorToEventGrid
                     "user::rwx,group::rwx,other::rw-");
                 await fileClient.SetAccessControlListAsync((accessControlList));
                 
-                // case  to append data - not ideal solution
-                //fileClient.CreateIfNotExists();
-                //string leaseId = null;
-                //long currentlength = fileClient.GetPropertiesAsync().Result.Value.ContentLength;
-                //long fileSize = ms.Length;
-                //var file = await fileClient.AppendAsync(ms, currentlength, leaseId:leaseId);
-                //await fileClient.FlushAsync(position: currentlength + fileSize, close: true, conditions: new Azure.Storage.Files.DataLake.Models.DataLakeRequestConditions() { LeaseId = leaseId });
-                //ms.Position = 0;
-                //File.WriteAllBytes(filePath, ms.ToArray());
-                
                 var uploadedVer = file.ToJson() != null;
 
                 return uploadedVer;
             }
             catch (Exception e)
             {
-                Console.WriteLine(e);
+                // log exception
+                this.logger.LogError("Change Stream watcher. Exception:" + e.Message);
                 throw;
             }
         }
@@ -208,9 +207,11 @@ namespace MongoSourceConnectorToEventGrid
                 this.blobServiceClient = new BlobServiceClient(storageAccountCon);
                 var containerClient = this.blobServiceClient.GetBlobContainerClient(container);
                 var blobClient = containerClient.GetBlobClient(filePath);
+               
                 // case 1 for json type
                 await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(updatedDocument.ToJson()));
                 var blob = await blobClient.UploadAsync(ms);
+                
                 // case2 for avro types
                 //var serializedContent = AvroConvert.Serialize(updatedDocument);
                 //await blobClient.DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots);
@@ -221,7 +222,7 @@ namespace MongoSourceConnectorToEventGrid
             }
             catch (Exception e)
             {
-                Console.WriteLine(e);
+                this.logger.LogError("UpdateBlobStorage. Exception:" + e.Message);
                 throw;
             }
         }
